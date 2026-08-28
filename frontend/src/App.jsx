@@ -15,7 +15,18 @@ import L from "leaflet";
 // API URL
 // ======================================================
 
-const API_URL = "http://127.0.0.1:8000";
+// Local development:
+// http://localhost:8000
+//
+// Production:
+// Set VITE_API_URL in Vercel Environment Variables.
+//
+// Example:
+// VITE_API_URL=https://land-acquisition-ai-sih-1.onrender.com
+
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  "http://localhost:8000";
 
 // ======================================================
 // FIX LEAFLET DEFAULT MARKER
@@ -124,7 +135,6 @@ function AutoFitBounds({ projects }) {
   useEffect(() => {
     let locations = [];
 
-    // DATABASE PROJECT LOCATIONS
     if (projects.length > 0) {
       locations = projects
         .map((project) => {
@@ -133,10 +143,7 @@ function AutoFitBounds({ projects }) {
           return districtLocations[district];
         })
         .filter(Boolean);
-    }
-
-    // DEMO LOCATIONS
-    else {
+    } else {
       locations = [
         [13.0827, 80.2707],
         [11.0168, 76.9558],
@@ -144,13 +151,9 @@ function AutoFitBounds({ projects }) {
       ];
     }
 
-    // ONE LOCATION
     if (locations.length === 1) {
       map.setView(locations[0], 9);
-    }
-
-    // MULTIPLE LOCATIONS
-    else if (locations.length > 1) {
+    } else if (locations.length > 1) {
       const bounds = L.latLngBounds(locations);
 
       map.fitBounds(bounds, {
@@ -169,10 +172,6 @@ function AutoFitBounds({ projects }) {
 // ======================================================
 
 function App() {
-  // ====================================================
-  // STATES
-  // ====================================================
-
   const [showForm, setShowForm] = useState(false);
 
   const [activePage, setActivePage] =
@@ -194,7 +193,7 @@ function App() {
     useState("");
 
   // ====================================================
-  // LOAD PROJECTS ON START
+  // LOAD PROJECTS
   // ====================================================
 
   useEffect(() => {
@@ -202,7 +201,7 @@ function App() {
   }, []);
 
   // ====================================================
-  // GET PROJECTS FROM FASTAPI
+  // GET PROJECTS
   // ====================================================
 
   const loadProjects = async () => {
@@ -210,7 +209,10 @@ function App() {
     setProjectsError("");
 
     try {
-      console.log("Loading projects from FastAPI...");
+      console.log(
+        "Loading projects from:",
+        `${API_URL}/projects`
+      );
 
       const response = await fetch(
         `${API_URL}/projects`,
@@ -221,11 +223,6 @@ function App() {
             Accept: "application/json",
           },
         }
-      );
-
-      console.log(
-        "Projects API status:",
-        response.status
       );
 
       if (!response.ok) {
@@ -250,19 +247,10 @@ function App() {
         Array.isArray(data.projects)
       ) {
         projectList = data.projects;
-      } else {
-        console.warn(
-          "Unexpected projects API response:",
-          data
-        );
       }
 
-      console.log(
-        "Projects loaded:",
-        projectList
-      );
-
       setProjects(projectList);
+
     } catch (error) {
       console.error(
         "Projects API error:",
@@ -270,8 +258,9 @@ function App() {
       );
 
       setProjectsError(
-        "Unable to load projects. Make sure FastAPI is running on port 8000."
+        "Unable to load projects. Please check the backend deployment."
       );
+
     } finally {
       setProjectsLoading(false);
     }
@@ -283,9 +272,7 @@ function App() {
 
   const openPrediction = () => {
     setActivePage("prediction");
-
     setShowForm(true);
-
     setPrediction(null);
   };
 
@@ -295,9 +282,7 @@ function App() {
 
   const openMap = () => {
     setActivePage("map");
-
     setShowForm(false);
-
     setPrediction(null);
   };
 
@@ -310,22 +295,14 @@ function App() {
 
     const formData = new FormData(e.target);
 
-    // ==================================================
-    // CREATE PROJECT DATA
-    // ==================================================
-
     const projectData = {
-      project_id:
-        formData.get("projectId"),
+      project_id: formData.get("projectId"),
 
-      project_type:
-        formData.get("projectType"),
+      project_type: formData.get("projectType"),
 
-      state:
-        formData.get("state"),
+      state: formData.get("state"),
 
-      district:
-        formData.get("district"),
+      district: formData.get("district"),
 
       land_area:
         Number(formData.get("landArea")),
@@ -364,14 +341,9 @@ function App() {
     );
 
     setLoading(true);
-
     setPrediction(null);
 
     try {
-      // ==================================================
-      // SEND DATA TO FASTAPI
-      // ==================================================
-
       const response = await fetch(
         `${API_URL}/predict`,
         {
@@ -385,23 +357,19 @@ function App() {
               "application/json",
           },
 
-          body:
-            JSON.stringify(
-              projectData
-            ),
+          body: JSON.stringify(
+            projectData
+          ),
         }
       );
+
+      const responseText =
+        await response.text();
 
       console.log(
         "Prediction API status:",
         response.status
       );
-
-      // Read response as text first
-      // This makes backend errors easier to see.
-
-      const responseText =
-        await response.text();
 
       console.log(
         "Prediction API response:",
@@ -422,10 +390,6 @@ function App() {
         result
       );
 
-      // ==================================================
-      // SHOW AI RESULT
-      // ==================================================
-
       setPrediction({
         probability:
           result.delay_probability,
@@ -440,15 +404,9 @@ function App() {
           result.recommendations || [],
       });
 
-      // ==================================================
-      // RELOAD PROJECTS
-      // ==================================================
+      // Reload projects after prediction
 
-      // IMPORTANT:
-      // If projects API fails, it will NOT
-      // trigger the prediction catch block.
-
-      loadProjects();
+      await loadProjects();
 
     } catch (error) {
       console.error(
@@ -460,8 +418,9 @@ function App() {
         "AI Prediction failed.\n\n" +
         error.message +
         "\n\n" +
-        "Make sure FastAPI is running on port 8000."
+        "Please check your deployed FastAPI backend."
       );
+
     } finally {
       setLoading(false);
     }
@@ -480,7 +439,7 @@ function App() {
   };
 
   // ====================================================
-  // RETURN UI
+  // UI
   // ====================================================
 
   return (
@@ -502,8 +461,6 @@ function App() {
 
         <nav>
 
-          {/* DASHBOARD */}
-
           <div
             className={`nav-item ${
               activePage === "dashboard" &&
@@ -513,16 +470,12 @@ function App() {
             }`}
             onClick={() => {
               setActivePage("dashboard");
-
               setShowForm(false);
-
               setPrediction(null);
             }}
           >
             🏠 Dashboard
           </div>
-
-          {/* PROJECTS */}
 
           <div
             className={`nav-item ${
@@ -532,16 +485,12 @@ function App() {
             }`}
             onClick={() => {
               setActivePage("projects");
-
               setShowForm(false);
-
               setPrediction(null);
             }}
           >
             📋 Projects
           </div>
-
-          {/* AI PREDICTION */}
 
           <div
             className={`nav-item ${
@@ -554,8 +503,6 @@ function App() {
             🤖 AI Prediction
           </div>
 
-          {/* GIS MAP */}
-
           <div
             className={`nav-item ${
               activePage === "map"
@@ -567,8 +514,6 @@ function App() {
             🗺️ GIS Map
           </div>
 
-          {/* ALERTS */}
-
           <div
             className={`nav-item ${
               activePage === "alerts"
@@ -577,9 +522,7 @@ function App() {
             }`}
             onClick={() => {
               setActivePage("alerts");
-
               setShowForm(false);
-
               setPrediction(null);
             }}
           >
@@ -930,8 +873,6 @@ function App() {
 
             </div>
 
-            {/* MAP LEGEND */}
-
             <div
               style={{
                 display: "flex",
@@ -954,8 +895,6 @@ function App() {
               </div>
 
             </div>
-
-            {/* REAL MAP */}
 
             <div className="real-map">
 
@@ -981,8 +920,6 @@ function App() {
                 <AutoFitBounds
                   projects={projects}
                 />
-
-                {/* DATABASE PROJECT MARKERS */}
 
                 {projects.map(
                   (project) => {
@@ -1024,65 +961,47 @@ function App() {
                             }}
                           >
 
-                            <h3
-                              style={{
-                                marginBottom: "10px",
-                              }}
-                            >
-
+                            <h3>
                               📍{" "}
                               {
                                 project.project_id
                               }
-
                             </h3>
 
                             <p>
-
                               <strong>
                                 District:
                               </strong>{" "}
-
                               {
                                 project.district
                               }
-
                             </p>
 
                             <p>
-
                               <strong>
                                 State:
                               </strong>{" "}
-
                               {
                                 project.state
                               }
-
                             </p>
 
                             <p>
-
                               <strong>
                                 Type:
                               </strong>{" "}
-
                               {
                                 project.project_type
                               }
-
                             </p>
 
                             <p>
-
                               <strong>
                                 Delay Probability:
                               </strong>{" "}
-
                               {
                                 project.delay_probability
                               }%
-
                             </p>
 
                             <p
@@ -1093,8 +1012,6 @@ function App() {
                                   ),
                                 fontWeight:
                                   "bold",
-                                fontSize:
-                                  "15px",
                               }}
                             >
 
@@ -1119,13 +1036,9 @@ function App() {
                   }
                 )}
 
-                {/* DEMO MARKERS */}
-
                 {projects.length === 0 && (
 
                   <>
-
-                    {/* CHENNAI */}
 
                     <Marker
                       position={[
@@ -1161,8 +1074,6 @@ function App() {
 
                     </Marker>
 
-                    {/* COIMBATORE */}
-
                     <Marker
                       position={[
                         11.0168,
@@ -1196,8 +1107,6 @@ function App() {
                       </Popup>
 
                     </Marker>
-
-                    {/* MADURAI */}
 
                     <Marker
                       position={[
@@ -1349,15 +1258,11 @@ function App() {
 
               <section className="dashboard-grid">
 
-                {/* AI RISK OVERVIEW */}
-
                 <div className="panel">
 
                   <h2>
                     AI Risk Overview
                   </h2>
-
-                  {/* HIGH */}
 
                   <div className="risk">
 
@@ -1383,8 +1288,6 @@ function App() {
 
                   </div>
 
-                  {/* MEDIUM */}
-
                   <div className="risk">
 
                     <div>
@@ -1408,8 +1311,6 @@ function App() {
                     </div>
 
                   </div>
-
-                  {/* LOW */}
 
                   <div className="risk">
 
@@ -1436,8 +1337,6 @@ function App() {
                   </div>
 
                 </div>
-
-                {/* RECENT PROJECTS */}
 
                 <div className="panel">
 
@@ -1509,8 +1408,6 @@ function App() {
 
               </section>
 
-              {/* AI PANEL */}
-
               <section className="ai-panel">
 
                 <div>
@@ -1535,8 +1432,6 @@ function App() {
                 </button>
 
               </section>
-
-              {/* MAP QUICK ACCESS */}
 
               <section className="ai-panel">
 
@@ -1575,8 +1470,6 @@ function App() {
 
           <section className="form-panel">
 
-            {/* FORM HEADER */}
-
             <div className="form-header">
 
               <div>
@@ -1601,8 +1494,6 @@ function App() {
 
             </div>
 
-            {/* FORM */}
-
             <form onSubmit={handleSubmit}>
 
               <h3>
@@ -1610,8 +1501,6 @@ function App() {
               </h3>
 
               <div className="form-grid">
-
-                {/* PROJECT ID */}
 
                 <div className="input-group">
 
@@ -1627,8 +1516,6 @@ function App() {
                   />
 
                 </div>
-
-                {/* PROJECT TYPE */}
 
                 <div className="input-group">
 
@@ -1673,8 +1560,6 @@ function App() {
 
                 </div>
 
-                {/* STATE */}
-
                 <div className="input-group">
 
                   <label>
@@ -1689,8 +1574,6 @@ function App() {
                   />
 
                 </div>
-
-                {/* DISTRICT */}
 
                 <div className="input-group">
 
@@ -1707,8 +1590,6 @@ function App() {
 
                 </div>
 
-                {/* LAND AREA */}
-
                 <div className="input-group">
 
                   <label>
@@ -1724,8 +1605,6 @@ function App() {
                   />
 
                 </div>
-
-                {/* FAMILIES */}
 
                 <div className="input-group">
 
@@ -1745,15 +1624,11 @@ function App() {
 
               </div>
 
-              {/* ACQUISITION PROGRESS */}
-
               <h3>
                 Acquisition Progress
               </h3>
 
               <div className="form-grid">
-
-                {/* COMPENSATION */}
 
                 <div className="input-group">
 
@@ -1772,8 +1647,6 @@ function App() {
 
                 </div>
 
-                {/* DOCUMENTATION */}
-
                 <div className="input-group">
 
                   <label>
@@ -1790,8 +1663,6 @@ function App() {
                   />
 
                 </div>
-
-                {/* APPROVAL */}
 
                 <div className="input-group">
 
@@ -1810,8 +1681,6 @@ function App() {
 
                 </div>
 
-                {/* RR */}
-
                 <div className="input-group">
 
                   <label>
@@ -1828,8 +1697,6 @@ function App() {
                   />
 
                 </div>
-
-                {/* POSSESSION */}
 
                 <div className="input-group">
 
@@ -1848,8 +1715,6 @@ function App() {
 
                 </div>
 
-                {/* LEGAL DISPUTES */}
-
                 <div className="input-group">
 
                   <label>
@@ -1866,8 +1731,6 @@ function App() {
 
                 </div>
 
-                {/* APPROVAL DELAY */}
-
                 <div className="input-group">
 
                   <label>
@@ -1883,8 +1746,6 @@ function App() {
                   />
 
                 </div>
-
-                {/* STAKEHOLDER */}
 
                 <div className="input-group">
 
@@ -1905,8 +1766,6 @@ function App() {
 
               </div>
 
-              {/* FORM BUTTONS */}
-
               <div className="form-actions">
 
                 <button
@@ -1925,8 +1784,7 @@ function App() {
 
                   {loading
                     ? "🤖 Analyzing..."
-                    : "🤖 Predict Delay Risk"
-                  }
+                    : "🤖 Predict Delay Risk"}
 
                 </button>
 
@@ -1946,8 +1804,6 @@ function App() {
                   🤖 AI Prediction Result
                 </h2>
 
-                {/* SCORE */}
-
                 <div className="prediction-score">
 
                   <span>
@@ -1955,14 +1811,10 @@ function App() {
                   </span>
 
                   <strong>
-                    {
-                      prediction.probability
-                    }%
+                    {prediction.probability}%
                   </strong>
 
                 </div>
-
-                {/* RISK */}
 
                 <div className="prediction-risk">
 
@@ -1977,13 +1829,9 @@ function App() {
 
                   {" "}
 
-                  {
-                    prediction.risk
-                  } RISK
+                  {prediction.risk} RISK
 
                 </div>
-
-                {/* RISK FACTORS */}
 
                 <div className="risk-factors">
 
@@ -1999,9 +1847,7 @@ function App() {
                       prediction.riskFactors.map(
                         (factor, index) => (
 
-                          <li
-                            key={index}
-                          >
+                          <li key={index}>
                             {factor}
                           </li>
 
@@ -2011,8 +1857,7 @@ function App() {
                     ) : (
 
                       <li>
-                        No major risk
-                        factors detected.
+                        No major risk factors detected.
                       </li>
 
                     )}
@@ -2020,8 +1865,6 @@ function App() {
                   </ul>
 
                 </div>
-
-                {/* RECOMMENDATIONS */}
 
                 <div className="recommendations">
 
@@ -2037,9 +1880,7 @@ function App() {
                       prediction.recommendations.map(
                         (action, index) => (
 
-                          <li
-                            key={index}
-                          >
+                          <li key={index}>
                             {action}
                           </li>
 
@@ -2049,8 +1890,8 @@ function App() {
                     ) : (
 
                       <li>
-                        Continue regular
-                        monitoring of the project.
+                        Continue regular monitoring
+                        of the project.
                       </li>
 
                     )}
