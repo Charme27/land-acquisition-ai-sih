@@ -1,4 +1,3 @@
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -29,52 +28,46 @@ app = FastAPI(
     description="AI-powered Land Acquisition Delay Prediction System",
     version="1.0.0"
 )
+
+
+# ============================================================
+# CORS CONFIGURATION
+# ============================================================
+
+allowed_origins = [
+    # Local Vite frontend
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+
+    # Vercel frontend
+    "https://land-acquisition-ai-sih.vercel.app",
+]
+
+
+# Optional Render environment variable
+frontend_url = os.getenv("FRONTEND_URL")
+
+if frontend_url:
+    frontend_url = frontend_url.rstrip("/")
+
+    if frontend_url not in allowed_origins:
+        allowed_origins.append(frontend_url)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://land-acquisition-ai-sih.vercel.app"
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ============================================================
 # CREATE DATABASE
 # ============================================================
 
 create_database()
-
-
-# ============================================================
-# CORS
-# ============================================================
-
-# Local frontend
-allowed_origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-
-# Production frontend URL
-# We will add this in Render Environment Variables later.
-frontend_url = os.getenv("FRONTEND_URL")
-
-if frontend_url:
-    allowed_origins.append(frontend_url)
-
-
-app.add_middleware(
-    CORSMiddleware,
-
-    allow_origins=allowed_origins,
-
-    allow_credentials=True,
-
-    allow_methods=["*"],
-
-    allow_headers=["*"],
-)
 
 
 # ============================================================
@@ -285,7 +278,7 @@ def predict(data: ProjectData):
 
 
     # --------------------------------------------------------
-    # REHABILITATION AND RESETTLEMENT
+    # REHABILITATION / RESETTLEMENT
     # --------------------------------------------------------
 
     if data.rr_progress < 60:
@@ -360,35 +353,20 @@ def predict(data: ProjectData):
         INSERT INTO projects (
 
             project_id,
-
             project_type,
-
             state,
-
             district,
-
             land_area,
-
             affected_families,
-
             compensation_percentage,
-
             documentation_percentage,
-
             approval_percentage,
-
             rr_progress,
-
             possession_percentage,
-
             legal_disputes,
-
             approval_delay_days,
-
             stakeholder_responsiveness,
-
             delay_probability,
-
             risk_level
 
         )
@@ -400,45 +378,27 @@ def predict(data: ProjectData):
         """,
 
         (
-
             data.project_id,
-
             data.project_type,
-
             data.state,
-
             data.district,
-
             data.land_area,
-
             data.affected_families,
-
             data.compensation_percentage,
-
             data.documentation_percentage,
-
             data.approval_percentage,
-
             data.rr_progress,
-
             data.possession_percentage,
-
             data.legal_disputes,
-
             data.approval_delay_days,
-
             data.stakeholder_responsiveness,
-
             probability_percentage,
-
             risk_level
-
         )
     )
 
 
     connection.commit()
-
     connection.close()
 
 

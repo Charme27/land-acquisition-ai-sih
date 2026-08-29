@@ -14,22 +14,26 @@ import L from "leaflet";
 // ======================================================
 // API URL
 // ======================================================
-
-// Local development:
-// http://localhost:8000
 //
-// Production:
-// Set VITE_API_URL in Vercel Environment Variables.
+// Local:
+// VITE_API_URL=http://127.0.0.1:8000
 //
-// Example:
+// Render:
 // VITE_API_URL=https://land-acquisition-ai-sih-1.onrender.com
+//
+// IMPORTANT:
+// Your deployed FastAPI backend is:
+// https://land-acquisition-ai-sih-1.onrender.com
+// ======================================================
 
 const API_URL =
   import.meta.env.VITE_API_URL ||
-  "http://localhost:8000";
+  "https://land-acquisition-ai-sih-1.onrender.com";
+
+console.log("API URL:", API_URL);
 
 // ======================================================
-// FIX LEAFLET DEFAULT MARKER
+// LEAFLET DEFAULT MARKER FIX
 // ======================================================
 
 delete L.Icon.Default.prototype._getIconUrl;
@@ -81,15 +85,17 @@ const districtLocations = {
 };
 
 // ======================================================
-// RISK COLORS
+// RISK COLOR
 // ======================================================
 
 const getRiskColor = (risk) => {
-  if (risk === "HIGH") {
+  const value = String(risk || "LOW").toUpperCase();
+
+  if (value === "HIGH") {
     return "#ef4444";
   }
 
-  if (risk === "MEDIUM") {
+  if (value === "MEDIUM") {
     return "#f59e0b";
   }
 
@@ -97,7 +103,7 @@ const getRiskColor = (risk) => {
 };
 
 // ======================================================
-// CUSTOM RISK MAP ICON
+// RISK ICON
 // ======================================================
 
 const createRiskIcon = (risk) => {
@@ -120,13 +126,12 @@ const createRiskIcon = (risk) => {
     `,
 
     iconSize: [22, 22],
-
     iconAnchor: [11, 11],
   });
 };
 
 // ======================================================
-// AUTO FIT MAP
+// MAP AUTO FIT
 // ======================================================
 
 function AutoFitBounds({ projects }) {
@@ -143,7 +148,9 @@ function AutoFitBounds({ projects }) {
           return districtLocations[district];
         })
         .filter(Boolean);
-    } else {
+    }
+
+    if (locations.length === 0) {
       locations = [
         [13.0827, 80.2707],
         [11.0168, 76.9558],
@@ -153,7 +160,7 @@ function AutoFitBounds({ projects }) {
 
     if (locations.length === 1) {
       map.setView(locations[0], 9);
-    } else if (locations.length > 1) {
+    } else {
       const bounds = L.latLngBounds(locations);
 
       map.fitBounds(bounds, {
@@ -172,6 +179,10 @@ function AutoFitBounds({ projects }) {
 // ======================================================
 
 function App() {
+  // ====================================================
+  // STATES
+  // ====================================================
+
   const [showForm, setShowForm] = useState(false);
 
   const [activePage, setActivePage] =
@@ -193,7 +204,7 @@ function App() {
     useState("");
 
   // ====================================================
-  // LOAD PROJECTS
+  // LOAD PROJECTS WHEN APP STARTS
   // ====================================================
 
   useEffect(() => {
@@ -201,7 +212,7 @@ function App() {
   }, []);
 
   // ====================================================
-  // GET PROJECTS
+  // LOAD PROJECTS
   // ====================================================
 
   const loadProjects = async () => {
@@ -225,18 +236,34 @@ function App() {
         }
       );
 
+      const responseText =
+        await response.text();
+
+      console.log(
+        "Projects status:",
+        response.status
+      );
+
+      console.log(
+        "Projects response:",
+        responseText
+      );
+
       if (!response.ok) {
         throw new Error(
-          `Projects API returned ${response.status}`
+          `Backend returned ${response.status}: ${responseText}`
         );
       }
 
-      const data = await response.json();
+      let data;
 
-      console.log(
-        "Projects API response:",
-        data
-      );
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(
+          "Backend returned invalid JSON."
+        );
+      }
 
       let projectList = [];
 
@@ -251,23 +278,63 @@ function App() {
 
       setProjects(projectList);
 
+      console.log(
+        "Projects loaded:",
+        projectList
+      );
     } catch (error) {
       console.error(
-        "Projects API error:",
+        "Project loading error:",
         error
       );
 
       setProjectsError(
-        "Unable to load projects. Please check the backend deployment."
+        error.message ||
+          "Unable to connect to the backend."
       );
-
     } finally {
       setProjectsLoading(false);
     }
   };
 
   // ====================================================
-  // OPEN AI PREDICTION
+  // STATISTICS
+  // ====================================================
+
+  const totalProjects = projects.length;
+
+  const highRiskProjects = projects.filter(
+    (project) =>
+      String(
+        project.risk_level
+      ).toUpperCase() === "HIGH"
+  );
+
+  const mediumRiskProjects = projects.filter(
+    (project) =>
+      String(
+        project.risk_level
+      ).toUpperCase() === "MEDIUM"
+  );
+
+  const lowRiskProjects = projects.filter(
+    (project) =>
+      String(
+        project.risk_level
+      ).toUpperCase() === "LOW"
+  );
+
+  const highCount =
+    highRiskProjects.length;
+
+  const mediumCount =
+    mediumRiskProjects.length;
+
+  const lowCount =
+    lowRiskProjects.length;
+
+  // ====================================================
+  // OPEN PREDICTION
   // ====================================================
 
   const openPrediction = () => {
@@ -277,11 +344,21 @@ function App() {
   };
 
   // ====================================================
-  // OPEN GIS MAP
+  // OPEN MAP
   // ====================================================
 
   const openMap = () => {
     setActivePage("map");
+    setShowForm(false);
+    setPrediction(null);
+  };
+
+  // ====================================================
+  // OPEN DASHBOARD
+  // ====================================================
+
+  const openDashboard = () => {
+    setActivePage("dashboard");
     setShowForm(false);
     setPrediction(null);
   };
@@ -293,55 +370,114 @@ function App() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    const formData = new FormData(e.target);
+    const formData =
+      new FormData(e.target);
+
+    // ==================================================
+    // CREATE DATA FOR FASTAPI
+    // ==================================================
 
     const projectData = {
-      project_id: formData.get("projectId"),
+      project_id:
+        formData.get("projectId"),
 
-      project_type: formData.get("projectType"),
+      project_type:
+        formData.get("projectType"),
 
-      state: formData.get("state"),
+      state:
+        formData.get("state"),
 
-      district: formData.get("district"),
+      district:
+        formData.get("district"),
 
       land_area:
-        Number(formData.get("landArea")),
+        Number(
+          formData.get("landArea")
+        ),
 
       affected_families:
-        Number(formData.get("families")),
+        Number(
+          formData.get("families")
+        ),
 
       compensation_percentage:
-        Number(formData.get("compensation")),
+        Number(
+          formData.get("compensation")
+        ),
 
       documentation_percentage:
-        Number(formData.get("documentation")),
+        Number(
+          formData.get("documentation")
+        ),
 
       approval_percentage:
-        Number(formData.get("approval")),
+        Number(
+          formData.get("approval")
+        ),
 
       rr_progress:
-        Number(formData.get("rrProgress")),
+        Number(
+          formData.get("rrProgress")
+        ),
 
       possession_percentage:
-        Number(formData.get("possession")),
+        Number(
+          formData.get("possession")
+        ),
 
       legal_disputes:
-        Number(formData.get("legalDisputes")),
+        Number(
+          formData.get("legalDisputes")
+        ),
 
       approval_delay_days:
-        Number(formData.get("approvalDelay")),
+        Number(
+          formData.get("approvalDelay")
+        ),
 
       stakeholder_responsiveness:
-        Number(formData.get("stakeholder")),
+        Number(
+          formData.get("stakeholder")
+        ),
     };
 
+    // ==================================================
+    // LOG DATA
+    // ==================================================
+
     console.log(
-      "Sending prediction data:",
+      "================================"
+    );
+
+    console.log(
+      "Sending prediction request"
+    );
+
+    console.log(
+      "API URL:",
+      API_URL
+    );
+
+    console.log(
+      "Endpoint:",
+      `${API_URL}/predict`
+    );
+
+    console.log(
+      "Project data:",
       projectData
+    );
+
+    console.log(
+      "================================"
     );
 
     setLoading(true);
     setPrediction(null);
+
+    // ==================================================
+    // CALL FASTAPI
+    // ==================================================
 
     try {
       const response = await fetch(
@@ -363,32 +499,61 @@ function App() {
         }
       );
 
+      // ==================================================
+      // READ RESPONSE
+      // ==================================================
+
       const responseText =
         await response.text();
 
       console.log(
-        "Prediction API status:",
+        "Backend HTTP status:",
         response.status
       );
 
       console.log(
-        "Prediction API response:",
+        "Backend response:",
         responseText
       );
 
+      // ==================================================
+      // CHECK HTTP ERROR
+      // ==================================================
+
       if (!response.ok) {
         throw new Error(
-          `Prediction API returned ${response.status}: ${responseText}`
+          `Prediction failed (${response.status}): ${responseText}`
         );
       }
 
-      const result =
-        JSON.parse(responseText);
+      // ==================================================
+      // CONVERT RESPONSE TO JSON
+      // ==================================================
+
+      let result;
+
+      try {
+        result =
+          JSON.parse(responseText);
+      } catch (jsonError) {
+        console.error(
+          "JSON parsing error:",
+          jsonError
+        );
+
+        throw new Error(
+          "FastAPI returned an invalid JSON response."
+        );
+      }
 
       console.log(
-        "Prediction result:",
+        "AI prediction result:",
         result
       );
+
+      // ==================================================
+      // STORE PREDICTION
+      // ==================================================
 
       setPrediction({
         probability:
@@ -397,6 +562,9 @@ function App() {
         risk:
           result.risk_level,
 
+        prediction:
+          result.prediction,
+
         riskFactors:
           result.risk_factors || [],
 
@@ -404,23 +572,37 @@ function App() {
           result.recommendations || [],
       });
 
-      // Reload projects after prediction
+      // ==================================================
+      // REFRESH PROJECTS
+      // ==================================================
 
       await loadProjects();
 
     } catch (error) {
+      // ==================================================
+      // ERROR
+      // ==================================================
+
       console.error(
-        "Prediction API error:",
+        "================================"
+      );
+
+      console.error(
+        "AI Prediction Error:"
+      );
+
+      console.error(
         error
       );
 
-      alert(
-        "AI Prediction failed.\n\n" +
-        error.message +
-        "\n\n" +
-        "Please check your deployed FastAPI backend."
+      console.error(
+        "================================"
       );
 
+      alert(
+        "AI Prediction Failed\n\n" +
+        error.message
+      );
     } finally {
       setLoading(false);
     }
@@ -432,14 +614,34 @@ function App() {
 
   const closeForm = () => {
     setShowForm(false);
-
     setPrediction(null);
-
     setActivePage("dashboard");
   };
 
   // ====================================================
-  // UI
+  // RECENT PROJECTS
+  // ====================================================
+
+  const recentProjects = [
+    ...projects,
+  ]
+    .sort((a, b) => {
+      return (
+        (b.id || 0) -
+        (a.id || 0)
+      );
+    })
+    .slice(0, 5);
+
+  // ====================================================
+  // RECENT HIGH RISK
+  // ====================================================
+
+  const recentHighRisk =
+    highRiskProjects.slice(0, 5);
+
+  // ====================================================
+  // RETURN UI
   // ====================================================
 
   return (
@@ -461,6 +663,8 @@ function App() {
 
         <nav>
 
+          {/* DASHBOARD */}
+
           <div
             className={`nav-item ${
               activePage === "dashboard" &&
@@ -468,14 +672,12 @@ function App() {
                 ? "active"
                 : ""
             }`}
-            onClick={() => {
-              setActivePage("dashboard");
-              setShowForm(false);
-              setPrediction(null);
-            }}
+            onClick={openDashboard}
           >
             🏠 Dashboard
           </div>
+
+          {/* PROJECTS */}
 
           <div
             className={`nav-item ${
@@ -484,13 +686,19 @@ function App() {
                 : ""
             }`}
             onClick={() => {
-              setActivePage("projects");
+              setActivePage(
+                "projects"
+              );
+
               setShowForm(false);
+
               setPrediction(null);
             }}
           >
             📋 Projects
           </div>
+
+          {/* AI PREDICTION */}
 
           <div
             className={`nav-item ${
@@ -498,10 +706,14 @@ function App() {
                 ? "active"
                 : ""
             }`}
-            onClick={openPrediction}
+            onClick={
+              openPrediction
+            }
           >
             🤖 AI Prediction
           </div>
+
+          {/* GIS */}
 
           <div
             className={`nav-item ${
@@ -514,6 +726,8 @@ function App() {
             🗺️ GIS Map
           </div>
 
+          {/* ALERTS */}
+
           <div
             className={`nav-item ${
               activePage === "alerts"
@@ -521,8 +735,12 @@ function App() {
                 : ""
             }`}
             onClick={() => {
-              setActivePage("alerts");
+              setActivePage(
+                "alerts"
+              );
+
               setShowForm(false);
+
               setPrediction(null);
             }}
           >
@@ -534,14 +752,12 @@ function App() {
       </aside>
 
       {/* ==================================================
-          MAIN CONTENT
+          MAIN
       ================================================== */}
 
       <main className="main">
 
-        {/* ==================================================
-            HEADER
-        ================================================== */}
+        {/* HEADER */}
 
         <header>
 
@@ -560,7 +776,9 @@ function App() {
 
           <button
             className="add-btn"
-            onClick={openPrediction}
+            onClick={
+              openPrediction
+            }
           >
             + Add Project
           </button>
@@ -580,7 +798,7 @@ function App() {
             </span>
 
             <h2>
-              1,248
+              {totalProjects}
             </h2>
 
             <p>
@@ -596,7 +814,7 @@ function App() {
             </span>
 
             <h2>
-              184
+              {highCount}
             </h2>
 
             <p>
@@ -612,7 +830,7 @@ function App() {
             </span>
 
             <h2>
-              327
+              {mediumCount}
             </h2>
 
             <p>
@@ -628,7 +846,7 @@ function App() {
             </span>
 
             <h2>
-              737
+              {lowCount}
             </h2>
 
             <p>
@@ -643,11 +861,16 @@ function App() {
             PROJECTS PAGE
         ================================================== */}
 
-        {activePage === "projects" && (
+        {activePage ===
+          "projects" && (
 
-          <section className="form-panel">
+          <section
+            className="form-panel"
+          >
 
-            <div className="form-header">
+            <div
+              className="form-header"
+            >
 
               <div>
 
@@ -656,39 +879,60 @@ function App() {
                 </h2>
 
                 <p>
-                  View land acquisition projects.
+                  All land acquisition
+                  projects stored in
+                  the database.
                 </p>
 
               </div>
 
+              <button
+                className="predict-btn"
+                onClick={
+                  openPrediction
+                }
+              >
+                + Add Project
+              </button>
+
             </div>
 
-            <div className="projects-table-container">
+            <div
+              className="projects-table-container"
+            >
 
               {projectsLoading ? (
 
-                <div className="projects-empty">
+                <div
+                  className="projects-empty"
+                >
 
                   <h2>
                     Loading Projects...
                   </h2>
 
                   <p>
-                    Fetching project data from FastAPI.
+                    Fetching data
+                    from backend.
                   </p>
 
                 </div>
 
               ) : projectsError ? (
 
-                <div className="projects-empty">
+                <div
+                  className="projects-empty"
+                >
 
-                  <div className="empty-icon">
+                  <div
+                    className="empty-icon"
+                  >
                     ⚠️
                   </div>
 
                   <h2>
-                    Unable to Load Projects
+                    Backend Connection
+                    Error
                   </h2>
 
                   <p>
@@ -697,18 +941,25 @@ function App() {
 
                   <button
                     className="predict-btn"
-                    onClick={loadProjects}
+                    onClick={
+                      loadProjects
+                    }
                   >
                     🔄 Try Again
                   </button>
 
                 </div>
 
-              ) : projects.length === 0 ? (
+              ) : projects.length ===
+                0 ? (
 
-                <div className="projects-empty">
+                <div
+                  className="projects-empty"
+                >
 
-                  <div className="empty-icon">
+                  <div
+                    className="empty-icon"
+                  >
                     📁
                   </div>
 
@@ -717,12 +968,16 @@ function App() {
                   </h2>
 
                   <p>
-                    Add your first land acquisition project.
+                    Add your first
+                    project to start
+                    AI analysis.
                   </p>
 
                   <button
                     className="predict-btn"
-                    onClick={openPrediction}
+                    onClick={
+                      openPrediction
+                    }
                   >
                     + Add New Project
                   </button>
@@ -731,7 +986,9 @@ function App() {
 
               ) : (
 
-                <table className="projects-table">
+                <table
+                  className="projects-table"
+                >
 
                   <thead>
 
@@ -768,72 +1025,90 @@ function App() {
                   <tbody>
 
                     {projects.map(
-                      (project) => (
+                      (
+                        project,
+                        index
+                      ) => {
 
-                        <tr
-                          key={
-                            project.id ||
-                            project.project_id
-                          }
-                        >
+                        const risk =
+                          String(
+                            project.risk_level ||
+                              "LOW"
+                          ).toUpperCase();
 
-                          <td>
+                        return (
 
-                            <strong>
+                          <tr
+                            key={
+                              project.id ||
+                              `${project.project_id}-${index}`
+                            }
+                          >
+
+                            <td>
+
+                              <strong>
+                                {
+                                  project.project_id
+                                }
+                              </strong>
+
+                            </td>
+
+                            <td>
                               {
-                                project.project_id
+                                project.project_type
                               }
-                            </strong>
+                            </td>
 
-                          </td>
+                            <td>
+                              {
+                                project.district
+                              }
+                            </td>
 
-                          <td>
-                            {
-                              project.project_type
-                            }
-                          </td>
+                            <td>
+                              {
+                                project.state
+                              }
+                            </td>
 
-                          <td>
-                            {
-                              project.district
-                            }
-                          </td>
-
-                          <td>
-                            {
-                              project.state
-                            }
-                          </td>
-
-                          <td>
-
-                            {
-                              project.delay_probability
-                            }%
-
-                          </td>
-
-                          <td>
-
-                            <span
-                              className={`table-risk ${
-                                project.risk_level
-                                  ? project.risk_level.toLowerCase()
-                                  : ""
-                              }`}
-                            >
+                            <td>
 
                               {
-                                project.risk_level
-                              }
+                                project.delay_probability
+                              }%
 
-                            </span>
+                            </td>
 
-                          </td>
+                            <td>
 
-                        </tr>
+                              <span
+                                className={`table-risk ${risk.toLowerCase()}`}
+                              >
 
-                      )
+                                {risk ===
+                                  "HIGH" &&
+                                  "🔴 "}
+
+                                {risk ===
+                                  "MEDIUM" &&
+                                  "🟡 "}
+
+                                {risk ===
+                                  "LOW" &&
+                                  "🟢 "}
+
+                                {risk}
+
+                              </span>
+
+                            </td>
+
+                          </tr>
+
+                        );
+                      }
                     )}
 
                   </tbody>
@@ -852,11 +1127,16 @@ function App() {
             GIS MAP
         ================================================== */}
 
-        {activePage === "map" && (
+        {activePage ===
+          "map" && (
 
-          <section className="form-panel">
+          <section
+            className="form-panel"
+          >
 
-            <div className="form-header">
+            <div
+              className="form-header"
+            >
 
               <div>
 
@@ -866,10 +1146,20 @@ function App() {
 
                 <p>
                   Geographic visualization
-                  of land acquisition projects.
+                  of land acquisition
+                  projects.
                 </p>
 
               </div>
+
+              <button
+                className="predict-btn"
+                onClick={
+                  loadProjects
+                }
+              >
+                🔄 Refresh
+              </button>
 
             </div>
 
@@ -883,15 +1173,24 @@ function App() {
             >
 
               <div>
-                🔴 <strong>High Risk</strong>
+                🔴{" "}
+                <strong>
+                  High Risk
+                </strong>
               </div>
 
               <div>
-                🟡 <strong>Medium Risk</strong>
+                🟡{" "}
+                <strong>
+                  Medium Risk
+                </strong>
               </div>
 
               <div>
-                🟢 <strong>Low Risk</strong>
+                🟢{" "}
+                <strong>
+                  Low Risk
+                </strong>
               </div>
 
             </div>
@@ -901,7 +1200,7 @@ function App() {
               <MapContainer
                 center={[
                   11.1271,
-                  78.6569
+                  78.6569,
                 ]}
                 zoom={7}
                 scrollWheelZoom={true}
@@ -922,30 +1221,39 @@ function App() {
                 />
 
                 {projects.map(
-                  (project) => {
+                  (
+                    project,
+                    index
+                  ) => {
 
                     const district =
                       project.district?.trim();
 
                     const location =
-                      districtLocations[district];
+                      districtLocations[
+                        district
+                      ];
 
                     if (!location) {
                       return null;
                     }
 
                     const risk =
-                      project.risk_level ||
-                      "LOW";
+                      String(
+                        project.risk_level ||
+                          "LOW"
+                      ).toUpperCase();
 
                     return (
 
                       <Marker
                         key={
                           project.id ||
-                          project.project_id
+                          `${project.project_id}-${index}`
                         }
-                        position={location}
+                        position={
+                          location
+                        }
                         icon={
                           createRiskIcon(
                             risk
@@ -957,11 +1265,17 @@ function App() {
 
                           <div
                             style={{
-                              minWidth: "210px",
+                              minWidth:
+                                "220px",
                             }}
                           >
 
-                            <h3>
+                            <h3
+                              style={{
+                                marginBottom:
+                                  "10px",
+                              }}
+                            >
                               📍{" "}
                               {
                                 project.project_id
@@ -1012,16 +1326,21 @@ function App() {
                                   ),
                                 fontWeight:
                                   "bold",
+                                fontSize:
+                                  "15px",
                               }}
                             >
 
-                              {risk === "HIGH" &&
+                              {risk ===
+                                "HIGH" &&
                                 "🔴 HIGH RISK"}
 
-                              {risk === "MEDIUM" &&
+                              {risk ===
+                                "MEDIUM" &&
                                 "🟡 MEDIUM RISK"}
 
-                              {risk === "LOW" &&
+                              {risk ===
+                                "LOW" &&
                                 "🟢 LOW RISK"}
 
                             </p>
@@ -1036,14 +1355,17 @@ function App() {
                   }
                 )}
 
-                {projects.length === 0 && (
+                {/* DEMO MARKERS */}
+
+                {projects.length ===
+                  0 && (
 
                   <>
 
                     <Marker
                       position={[
                         13.0827,
-                        80.2707
+                        80.2707,
                       ]}
                       icon={
                         createRiskIcon(
@@ -1055,7 +1377,7 @@ function App() {
                       <Popup>
 
                         <strong>
-                          LA-1023
+                          Demo Project
                         </strong>
 
                         <br />
@@ -1064,11 +1386,7 @@ function App() {
 
                         <br />
 
-                        Highway Expansion
-
-                        <br />
-
-                        🔴 87% Delay Risk
+                        🔴 High Risk
 
                       </Popup>
 
@@ -1077,7 +1395,7 @@ function App() {
                     <Marker
                       position={[
                         11.0168,
-                        76.9558
+                        76.9558,
                       ]}
                       icon={
                         createRiskIcon(
@@ -1089,7 +1407,7 @@ function App() {
                       <Popup>
 
                         <strong>
-                          LA-1087
+                          Demo Project
                         </strong>
 
                         <br />
@@ -1098,11 +1416,7 @@ function App() {
 
                         <br />
 
-                        Railway Project
-
-                        <br />
-
-                        🟡 81% Delay Risk
+                        🟡 Medium Risk
 
                       </Popup>
 
@@ -1111,7 +1425,7 @@ function App() {
                     <Marker
                       position={[
                         9.9252,
-                        78.1198
+                        78.1198,
                       ]}
                       icon={
                         createRiskIcon(
@@ -1123,7 +1437,7 @@ function App() {
                       <Popup>
 
                         <strong>
-                          LA-1142
+                          Demo Project
                         </strong>
 
                         <br />
@@ -1132,11 +1446,7 @@ function App() {
 
                         <br />
 
-                        Road Development
-
-                        <br />
-
-                        🔴 76% Delay Risk
+                        🔴 High Risk
 
                       </Popup>
 
@@ -1158,11 +1468,16 @@ function App() {
             ALERTS
         ================================================== */}
 
-        {activePage === "alerts" && (
+        {activePage ===
+          "alerts" && (
 
-          <section className="form-panel">
+          <section
+            className="form-panel"
+          >
 
-            <div className="form-header">
+            <div
+              className="form-header"
+            >
 
               <div>
 
@@ -1171,70 +1486,178 @@ function App() {
                 </h2>
 
                 <p>
-                  Monitor projects requiring attention.
+                  Projects requiring
+                  immediate attention.
                 </p>
 
               </div>
 
+              <button
+                className="predict-btn"
+                onClick={
+                  loadProjects
+                }
+              >
+                🔄 Refresh
+              </button>
+
             </div>
 
-            <div className="alerts-container">
+            <div
+              className="alerts-container"
+            >
 
-              <div className="alert-card high-alert">
+              {recentHighRisk.length >
+              0 ? (
 
-                <div className="alert-icon">
-                  🔴
+                recentHighRisk.map(
+                  (
+                    project,
+                    index
+                  ) => (
+
+                    <div
+                      className="alert-card high-alert"
+                      key={
+                        project.id ||
+                        `${project.project_id}-${index}`
+                      }
+                    >
+
+                      <div
+                        className="alert-icon"
+                      >
+                        🔴
+                      </div>
+
+                      <div>
+
+                        <h3>
+                          High Risk Project
+                        </h3>
+
+                        <p>
+
+                          <strong>
+                            {
+                              project.project_id
+                            }
+                          </strong>{" "}
+
+                          has a{" "}
+
+                          <strong>
+                            {
+                              project.delay_probability
+                            }%
+                          </strong>{" "}
+
+                          probability of
+                          delay.
+
+                        </p>
+
+                        <small>
+                          {
+                            project.district
+                          }{" "}
+                          •{" "}
+                          {
+                            project.project_type
+                          }
+                        </small>
+
+                      </div>
+
+                    </div>
+
+                  )
+                )
+
+              ) : (
+
+                <div
+                  className="alert-card"
+                >
+
+                  <div
+                    className="alert-icon"
+                  >
+                    🟢
+                  </div>
+
+                  <div>
+
+                    <h3>
+                      No High Risk Alerts
+                    </h3>
+
+                    <p>
+                      No high-risk projects
+                      are currently
+                      recorded.
+                    </p>
+
+                  </div>
+
                 </div>
 
-                <div>
+              )}
 
-                  <h3>
-                    High Risk Project
-                  </h3>
+              {mediumCount > 0 && (
 
-                  <p>
-                    LA-1023 has an
-                    87% probability of delay.
-                  </p>
+                <div
+                  className="alert-card medium-alert"
+                >
+
+                  <div
+                    className="alert-icon"
+                  >
+                    🟡
+                  </div>
+
+                  <div>
+
+                    <h3>
+                      Medium Risk Projects
+                    </h3>
+
+                    <p>
+                      {mediumCount} project
+                      {mediumCount > 1
+                        ? "s are"
+                        : " is"}{" "}
+                      currently
+                      classified as
+                      medium risk.
+                    </p>
+
+                  </div>
 
                 </div>
 
-              </div>
+              )}
 
-              <div className="alert-card medium-alert">
+              <div
+                className="alert-card"
+              >
 
-                <div className="alert-icon">
-                  🟡
-                </div>
-
-                <div>
-
-                  <h3>
-                    Medium Risk Project
-                  </h3>
-
-                  <p>
-                    LA-1087 requires monitoring.
-                  </p>
-
-                </div>
-
-              </div>
-
-              <div className="alert-card">
-
-                <div className="alert-icon">
+                <div
+                  className="alert-icon"
+                >
                   ℹ️
                 </div>
 
                 <div>
 
                   <h3>
-                    System Notification
+                    AI System
                   </h3>
 
                   <p>
-                    AI model is running successfully.
+                    AI prediction service
+                    is connected to the
+                    backend.
                   </p>
 
                 </div>
@@ -1252,215 +1675,472 @@ function App() {
         ================================================== */}
 
         {!showForm &&
-          activePage === "dashboard" && (
+          activePage ===
+            "dashboard" && (
 
-            <>
+          <>
 
-              <section className="dashboard-grid">
+            <section
+              className="dashboard-grid"
+            >
 
-                <div className="panel">
+              {/* RISK OVERVIEW */}
 
-                  <h2>
-                    AI Risk Overview
-                  </h2>
+              <div className="panel">
 
-                  <div className="risk">
+                <h2>
+                  AI Risk Overview
+                </h2>
 
-                    <div>
+                <div className="risk">
 
-                      <strong>
-                        🔴 High Risk
-                      </strong>
+                  <div>
 
-                      <span>
-                        184 Projects
-                      </span>
+                    <strong>
+                      🔴 High Risk
+                    </strong>
 
-                    </div>
-
-                    <div className="bar">
-
-                      <div
-                        className="bar-fill high-bar"
-                      ></div>
-
-                    </div>
+                    <span>
+                      {highCount} Projects
+                    </span>
 
                   </div>
 
-                  <div className="risk">
+                  <div className="bar">
 
-                    <div>
-
-                      <strong>
-                        🟡 Medium Risk
-                      </strong>
-
-                      <span>
-                        327 Projects
-                      </span>
-
-                    </div>
-
-                    <div className="bar">
-
-                      <div
-                        className="bar-fill medium-bar"
-                      ></div>
-
-                    </div>
-
-                  </div>
-
-                  <div className="risk">
-
-                    <div>
-
-                      <strong>
-                        🟢 Low Risk
-                      </strong>
-
-                      <span>
-                        737 Projects
-                      </span>
-
-                    </div>
-
-                    <div className="bar">
-
-                      <div
-                        className="bar-fill low-bar"
-                      ></div>
-
-                    </div>
+                    <div
+                      className="bar-fill high-bar"
+                      style={{
+                        width:
+                          totalProjects >
+                          0
+                            ? `${
+                                (highCount /
+                                  totalProjects) *
+                                100
+                              }%`
+                            : "0%",
+                      }}
+                    />
 
                   </div>
 
                 </div>
 
-                <div className="panel">
+                <div className="risk">
 
-                  <h2>
-                    Recent High-Risk Projects
-                  </h2>
+                  <div>
 
-                  <div className="project">
+                    <strong>
+                      🟡 Medium Risk
+                    </strong>
 
-                    <div>
-
-                      <strong>
-                        LA-1023
-                      </strong>
-
-                      <p>
-                        Chennai – Highway Expansion
-                      </p>
-
-                    </div>
-
-                    <span className="risk-badge">
-                      87%
+                    <span>
+                      {mediumCount} Projects
                     </span>
 
                   </div>
 
-                  <div className="project">
+                  <div className="bar">
 
-                    <div>
-
-                      <strong>
-                        LA-1087
-                      </strong>
-
-                      <p>
-                        Coimbatore – Railway Project
-                      </p>
-
-                    </div>
-
-                    <span className="risk-badge">
-                      81%
-                    </span>
-
-                  </div>
-
-                  <div className="project">
-
-                    <div>
-
-                      <strong>
-                        LA-1142
-                      </strong>
-
-                      <p>
-                        Madurai – Road Development
-                      </p>
-
-                    </div>
-
-                    <span className="risk-badge">
-                      76%
-                    </span>
+                    <div
+                      className="bar-fill medium-bar"
+                      style={{
+                        width:
+                          totalProjects >
+                          0
+                            ? `${
+                                (mediumCount /
+                                  totalProjects) *
+                                100
+                              }%`
+                            : "0%",
+                      }}
+                    />
 
                   </div>
 
                 </div>
 
-              </section>
+                <div className="risk">
 
-              <section className="ai-panel">
+                  <div>
+
+                    <strong>
+                      🟢 Low Risk
+                    </strong>
+
+                    <span>
+                      {lowCount} Projects
+                    </span>
+
+                  </div>
+
+                  <div className="bar">
+
+                    <div
+                      className="bar-fill low-bar"
+                      style={{
+                        width:
+                          totalProjects >
+                          0
+                            ? `${
+                                (lowCount /
+                                  totalProjects) *
+                                100
+                              }%`
+                            : "0%",
+                      }}
+                    />
+
+                  </div>
+
+                </div>
+
+              </div>
+
+              {/* RECENT HIGH RISK */}
+
+              <div className="panel">
+
+                <h2>
+                  Recent High-Risk
+                  Projects
+                </h2>
+
+                {recentHighRisk.length ===
+                0 ? (
+
+                  <div className="project">
+
+                    <div>
+
+                      <strong>
+                        No high-risk
+                        projects
+                      </strong>
+
+                      <p>
+                        Everything is
+                        currently under
+                        control.
+                      </p>
+
+                    </div>
+
+                    <span>
+                      🟢
+                    </span>
+
+                  </div>
+
+                ) : (
+
+                  recentHighRisk
+                    .slice(0, 3)
+                    .map(
+                      (
+                        project,
+                        index
+                      ) => (
+
+                        <div
+                          className="project"
+                          key={
+                            project.id ||
+                            `${project.project_id}-${index}`
+                          }
+                        >
+
+                          <div>
+
+                            <strong>
+                              {
+                                project.project_id
+                              }
+                            </strong>
+
+                            <p>
+                              {
+                                project.district
+                              }{" "}
+                              –{" "}
+                              {
+                                project.project_type
+                              }
+                            </p>
+
+                          </div>
+
+                          <span
+                            className="risk-badge"
+                          >
+                            {
+                              project.delay_probability
+                            }%
+                          </span>
+
+                        </div>
+
+                      )
+                    )
+
+                )}
+
+              </div>
+
+            </section>
+
+            {/* RECENT PROJECTS */}
+
+            <section className="panel">
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent:
+                    "space-between",
+                  alignItems: "center",
+                  marginBottom:
+                    "15px",
+                }}
+              >
 
                 <div>
 
                   <h2>
-                    🤖 AI Delay Prediction
+                    Recent Projects
                   </h2>
 
                   <p>
-                    Analyze project factors
-                    and predict the probability
-                    of land acquisition delays.
+                    Latest projects
+                    analyzed by the
+                    AI system.
                   </p>
 
                 </div>
 
                 <button
                   className="predict-btn"
-                  onClick={openPrediction}
+                  onClick={() =>
+                    setActivePage(
+                      "projects"
+                    )
+                  }
                 >
-                  Predict Project Risk →
+                  View All →
                 </button>
 
-              </section>
+              </div>
 
-              <section className="ai-panel">
+              {recentProjects.length ===
+              0 ? (
 
-                <div>
+                <div
+                  className="projects-empty"
+                >
+
+                  <div
+                    className="empty-icon"
+                  >
+                    📁
+                  </div>
 
                   <h2>
-                    🗺️ GIS Project Map
+                    No Projects Yet
                   </h2>
 
                   <p>
-                    View project locations
-                    and identify high-risk
-                    areas geographically.
+                    Add a project to
+                    begin AI risk
+                    analysis.
                   </p>
 
                 </div>
 
-                <button
-                  className="predict-btn"
-                  onClick={openMap}
+              ) : (
+
+                <div
+                  className="projects-table-container"
                 >
-                  Open GIS Map →
-                </button>
 
-              </section>
+                  <table
+                    className="projects-table"
+                  >
 
-            </>
+                    <thead>
 
-          )}
+                      <tr>
+
+                        <th>
+                          Project
+                        </th>
+
+                        <th>
+                          District
+                        </th>
+
+                        <th>
+                          Type
+                        </th>
+
+                        <th>
+                          Risk
+                        </th>
+
+                      </tr>
+
+                    </thead>
+
+                    <tbody>
+
+                      {recentProjects.map(
+                        (
+                          project,
+                          index
+                        ) => {
+
+                          const risk =
+                            String(
+                              project.risk_level ||
+                                "LOW"
+                            ).toUpperCase();
+
+                          return (
+
+                            <tr
+                              key={
+                                project.id ||
+                                `${project.project_id}-${index}`
+                              }
+                            >
+
+                              <td>
+
+                                <strong>
+                                  {
+                                    project.project_id
+                                  }
+                                </strong>
+
+                              </td>
+
+                              <td>
+                                {
+                                  project.district
+                                }
+                              </td>
+
+                              <td>
+                                {
+                                  project.project_type
+                                }
+                              </td>
+
+                              <td>
+
+                                <span
+                                  className={`table-risk ${risk.toLowerCase()}`}
+                                >
+
+                                  {risk ===
+                                    "HIGH" &&
+                                    "🔴 "}
+
+                                  {risk ===
+                                    "MEDIUM" &&
+                                    "🟡 "}
+
+                                  {risk ===
+                                    "LOW" &&
+                                    "🟢 "}
+
+                                  {
+                                    project.delay_probability
+                                  }%
+
+                                </span>
+
+                              </td>
+
+                            </tr>
+
+                          );
+                        }
+                      )}
+
+                    </tbody>
+
+                  </table>
+
+                </div>
+
+              )}
+
+            </section>
+
+            {/* AI PANEL */}
+
+            <section className="ai-panel">
+
+              <div>
+
+                <h2>
+                  🤖 AI Delay Prediction
+                </h2>
+
+                <p>
+                  Analyze land
+                  acquisition factors
+                  and predict the
+                  probability of
+                  project delays.
+                </p>
+
+              </div>
+
+              <button
+                className="predict-btn"
+                onClick={
+                  openPrediction
+                }
+              >
+                Predict Project Risk →
+              </button>
+
+            </section>
+
+            {/* GIS PANEL */}
+
+            <section className="ai-panel">
+
+              <div>
+
+                <h2>
+                  🗺️ GIS Project Map
+                </h2>
+
+                <p>
+                  View project locations
+                  and identify
+                  high-risk areas
+                  geographically.
+                </p>
+
+              </div>
+
+              <button
+                className="predict-btn"
+                onClick={openMap}
+              >
+                Open GIS Map →
+              </button>
+
+            </section>
+
+          </>
+
+        )}
 
         {/* ==================================================
             AI PREDICTION FORM
@@ -1468,9 +2148,13 @@ function App() {
 
         {showForm && (
 
-          <section className="form-panel">
+          <section
+            className="form-panel"
+          >
 
-            <div className="form-header">
+            <div
+              className="form-header"
+            >
 
               <div>
 
@@ -1480,7 +2164,8 @@ function App() {
 
                 <p>
                   Enter project details
-                  for AI-based delay prediction.
+                  for AI-based delay
+                  prediction.
                 </p>
 
               </div>
@@ -1494,15 +2179,27 @@ function App() {
 
             </div>
 
-            <form onSubmit={handleSubmit}>
+            <form
+              onSubmit={
+                handleSubmit
+              }
+            >
+
+              {/* PROJECT INFORMATION */}
 
               <h3>
                 Project Information
               </h3>
 
-              <div className="form-grid">
+              <div
+                className="form-grid"
+              >
 
-                <div className="input-group">
+                {/* PROJECT ID */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Project ID
@@ -1517,7 +2214,11 @@ function App() {
 
                 </div>
 
-                <div className="input-group">
+                {/* PROJECT TYPE */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Project Type
@@ -1560,7 +2261,11 @@ function App() {
 
                 </div>
 
-                <div className="input-group">
+                {/* STATE */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     State
@@ -1570,12 +2275,17 @@ function App() {
                     type="text"
                     name="state"
                     placeholder="Example: Tamil Nadu"
+                    defaultValue="Tamil Nadu"
                     required
                   />
 
                 </div>
 
-                <div className="input-group">
+                {/* DISTRICT */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     District
@@ -1590,7 +2300,11 @@ function App() {
 
                 </div>
 
-                <div className="input-group">
+                {/* LAND AREA */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Land Area (Acres)
@@ -1600,13 +2314,18 @@ function App() {
                     type="number"
                     name="landArea"
                     min="0"
+                    step="0.01"
                     placeholder="Example: 250"
                     required
                   />
 
                 </div>
 
-                <div className="input-group">
+                {/* FAMILIES */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Affected Families
@@ -1624,13 +2343,21 @@ function App() {
 
               </div>
 
+              {/* ACQUISITION PROGRESS */}
+
               <h3>
                 Acquisition Progress
               </h3>
 
-              <div className="form-grid">
+              <div
+                className="form-grid"
+              >
 
-                <div className="input-group">
+                {/* COMPENSATION */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Compensation Completed (%)
@@ -1647,7 +2374,11 @@ function App() {
 
                 </div>
 
-                <div className="input-group">
+                {/* DOCUMENTATION */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Documentation Completed (%)
@@ -1664,7 +2395,11 @@ function App() {
 
                 </div>
 
-                <div className="input-group">
+                {/* APPROVAL */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Approval Completed (%)
@@ -1681,7 +2416,11 @@ function App() {
 
                 </div>
 
-                <div className="input-group">
+                {/* REHABILITATION */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Rehabilitation Progress (%)
@@ -1698,7 +2437,11 @@ function App() {
 
                 </div>
 
-                <div className="input-group">
+                {/* POSSESSION */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Possession Completed (%)
@@ -1715,7 +2458,11 @@ function App() {
 
                 </div>
 
-                <div className="input-group">
+                {/* LEGAL DISPUTES */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Legal Disputes
@@ -1731,7 +2478,11 @@ function App() {
 
                 </div>
 
-                <div className="input-group">
+                {/* APPROVAL DELAY */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Approval Delay (Days)
@@ -1747,7 +2498,11 @@ function App() {
 
                 </div>
 
-                <div className="input-group">
+                {/* STAKEHOLDER */}
+
+                <div
+                  className="input-group"
+                >
 
                   <label>
                     Stakeholder Responsiveness (%)
@@ -1766,12 +2521,20 @@ function App() {
 
               </div>
 
-              <div className="form-actions">
+              {/* ==================================================
+                  FORM BUTTONS
+              ================================================== */}
+
+              <div
+                className="form-actions"
+              >
 
                 <button
                   type="button"
                   className="cancel-btn"
-                  onClick={closeForm}
+                  onClick={
+                    closeForm
+                  }
                 >
                   Cancel
                 </button>
@@ -1798,13 +2561,19 @@ function App() {
 
             {prediction && (
 
-              <div className="prediction-result">
+              <div
+                className="prediction-result"
+              >
 
                 <h2>
                   🤖 AI Prediction Result
                 </h2>
 
-                <div className="prediction-score">
+                {/* PROBABILITY */}
+
+                <div
+                  className="prediction-score"
+                >
 
                   <span>
                     Delay Probability
@@ -1816,24 +2585,46 @@ function App() {
 
                 </div>
 
-                <div className="prediction-risk">
+                {/* RISK */}
 
-                  {prediction.risk ===
+                <div
+                  className="prediction-risk"
+                  style={{
+                    color:
+                      getRiskColor(
+                        prediction.risk
+                      ),
+                  }}
+                >
+
+                  {String(
+                    prediction.risk
+                  ).toUpperCase() ===
                     "HIGH" && "🔴"}
 
-                  {prediction.risk ===
+                  {String(
+                    prediction.risk
+                  ).toUpperCase() ===
                     "MEDIUM" && "🟡"}
 
-                  {prediction.risk ===
+                  {String(
+                    prediction.risk
+                  ).toUpperCase() ===
                     "LOW" && "🟢"}
 
                   {" "}
 
-                  {prediction.risk} RISK
+                  {prediction.risk}
+
+                  {" "}RISK
 
                 </div>
 
-                <div className="risk-factors">
+                {/* RISK FACTORS */}
+
+                <div
+                  className="risk-factors"
+                >
 
                   <h3>
                     ⚠️ Key Risk Factors
@@ -1841,23 +2632,34 @@ function App() {
 
                   <ul>
 
-                    {prediction.riskFactors
+                    {prediction
+                      .riskFactors
                       .length > 0 ? (
 
-                      prediction.riskFactors.map(
-                        (factor, index) => (
+                      prediction
+                        .riskFactors
+                        .map(
+                          (
+                            factor,
+                            index
+                          ) => (
 
-                          <li key={index}>
-                            {factor}
-                          </li>
+                            <li
+                              key={
+                                index
+                              }
+                            >
+                              {factor}
+                            </li>
 
+                          )
                         )
-                      )
 
                     ) : (
 
                       <li>
-                        No major risk factors detected.
+                        No major risk
+                        factors detected.
                       </li>
 
                     )}
@@ -1866,7 +2668,11 @@ function App() {
 
                 </div>
 
-                <div className="recommendations">
+                {/* RECOMMENDATIONS */}
+
+                <div
+                  className="recommendations"
+                >
 
                   <h3>
                     💡 Recommended Actions
@@ -1874,29 +2680,73 @@ function App() {
 
                   <ul>
 
-                    {prediction.recommendations
+                    {prediction
+                      .recommendations
                       .length > 0 ? (
 
-                      prediction.recommendations.map(
-                        (action, index) => (
+                      prediction
+                        .recommendations
+                        .map(
+                          (
+                            action,
+                            index
+                          ) => (
 
-                          <li key={index}>
-                            {action}
-                          </li>
+                            <li
+                              key={
+                                index
+                              }
+                            >
+                              {action}
+                            </li>
 
+                          )
                         )
-                      )
 
                     ) : (
 
                       <li>
-                        Continue regular monitoring
-                        of the project.
+                        Continue regular
+                        monitoring of
+                        the project.
                       </li>
 
                     )}
 
                   </ul>
+
+                </div>
+
+                {/* RESULT ACTIONS */}
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "12px",
+                    marginTop: "20px",
+                    flexWrap: "wrap",
+                  }}
+                >
+
+                  <button
+                    className="predict-btn"
+                    onClick={() =>
+                      setActivePage(
+                        "projects"
+                      )
+                    }
+                  >
+                    📋 View Projects
+                  </button>
+
+                  <button
+                    className="cancel-btn"
+                    onClick={
+                      openDashboard
+                    }
+                  >
+                    🏠 Dashboard
+                  </button>
 
                 </div>
 
