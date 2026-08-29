@@ -1,6 +1,5 @@
 import sqlite3
 
-
 DATABASE_NAME = "projects.db"
 
 
@@ -42,7 +41,6 @@ def create_database():
     """)
 
     connection.commit()
-
     connection.close()
 
 
